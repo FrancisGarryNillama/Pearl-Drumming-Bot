@@ -1,0 +1,32 @@
+# Pearl27 Automation — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# --- Web Automation ---
+selenium==4.18.1
+webdriver-manager==4.0.1
+
+# --- HTTP Requests ---
+requests==2.31.0
+urllib3==2.2.1
+
+# --- HTML Parsing ---
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
+# --- Google Sheets ---
+gspread==6.0.2
+google-auth==2.28.2
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.122.0
+
+# --- Environment & Config ---
+python-dotenv==1.0.1
+
+# --- Fuzzy Matching (for Lifewood keyword detection) ---
+thefuzz==0.22.1
+python-Levenshtein==0.25.0
+
+# --- Utilities ---
+tenacity==8.2.3
+colorlog==6.8.2
