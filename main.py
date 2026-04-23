@@ -37,7 +37,7 @@ from pages.login_page import LoginPage
 from pages.dashboard_page import DashboardPage, DrummingPost
 from pages.post_page import PostPage
 from services.scraper import ExternalScraper, ScrapedContent
-from services.llm_service import LLMService
+from services.llm_services import LLMService
 from services.sheets_service import SheetsService
 from utils.logger import setup_root_logger, get_logger
 
@@ -73,7 +73,16 @@ def build_driver(cfg: AppConfig) -> webdriver.Chrome:
     # Suppress "Chrome is being controlled by automated software" banner
     options.add_argument("--disable-infobars")
 
-    service = ChromeService(ChromeDriverManager().install())
+    # Get ChromeDriver path - webdriver-manager has issues, so construct manually
+    driver_manager = ChromeDriverManager()
+    driver_path = driver_manager.install()
+    # Fix for webdriver-manager bug where it returns wrong path
+    if driver_path.endswith('THIRD_PARTY_NOTICES.chromedriver'):
+        import os
+        driver_dir = os.path.dirname(driver_path)
+        driver_path = os.path.join(driver_dir, 'chromedriver.exe')
+
+    service = ChromeService(driver_path)
     driver  = webdriver.Chrome(service=service, options=options)
 
     driver.implicitly_wait(cfg.webdriver.implicit_wait)
@@ -160,6 +169,7 @@ class Pearl27Orchestrator:
             url=self.cfg.platform.url,
             username=self.cfg.platform.username,
             password=self.cfg.platform.password,
+            invitation_code=self.cfg.platform.invitation_code,
         )
         if not success:
             log.error("Login failed. Aborting.")

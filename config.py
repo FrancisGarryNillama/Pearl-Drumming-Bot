@@ -39,6 +39,7 @@ class PlatformConfig:
     url: str = field(default_factory=lambda: _require("PLATFORM_URL"))
     username: str = field(default_factory=lambda: _require("PLATFORM_USERNAME"))
     password: str = field(default_factory=lambda: _require("PLATFORM_PASSWORD"))
+    invitation_code: str = field(default_factory=lambda: _require("INVITATION_CODE"))
     account_number: str = field(default_factory=lambda: _optional("ACCOUNT_NUMBER", "PH1037"))
     drummer_name: str = field(default_factory=lambda: _optional("DRUMMER_NAME", "Garry"))
     site: str = "PH"

@@ -170,3 +170,54 @@ class BasePage(ABC):
             log.info(f"Screenshot saved: {path}")
         except Exception as exc:
             log.warning(f"Could not save screenshot: {exc}")
+
+    # ─────────────────────────────────────────
+    # Debug helpers
+    # ─────────────────────────────────────────
+
+    def log_form_controls(self, context: str = "", limit: int = 50) -> None:
+        """
+        Log a compact list of visible form controls to help debug selectors.
+
+        Never logs element values.
+        """
+        from selenium.webdriver.common.by import By
+
+        try:
+            controls = self.driver.find_elements(By.CSS_SELECTOR, "input, textarea, select")
+        except Exception as exc:
+            log.debug(f"Could not enumerate form controls: {exc}")
+            return
+
+        if context:
+            log.info(f"Form controls visible ({context}): {len(controls)} found")
+        else:
+            log.info(f"Form controls visible: {len(controls)} found")
+
+        for idx, el in enumerate(controls[:limit], start=1):
+            try:
+                tag = (el.tag_name or "").lower()
+                type_attr = (el.get_attribute("type") or "").lower()
+                name = el.get_attribute("name") or ""
+                el_id = el.get_attribute("id") or ""
+                placeholder = el.get_attribute("placeholder") or ""
+                aria = el.get_attribute("aria-label") or ""
+                testid = el.get_attribute("data-testid") or el.get_attribute("data-test") or ""
+                role = el.get_attribute("role") or ""
+                autocomplete = el.get_attribute("autocomplete") or ""
+                class_name = el.get_attribute("class") or ""
+
+                if len(class_name) > 80:
+                    class_name = class_name[:77] + "..."
+                if len(placeholder) > 80:
+                    placeholder = placeholder[:77] + "..."
+                if len(aria) > 80:
+                    aria = aria[:77] + "..."
+
+                log.info(
+                    f"[{idx:02d}] <{tag}> type='{type_attr}' name='{name}' id='{el_id}' "
+                    f"placeholder='{placeholder}' aria-label='{aria}' data-testid='{testid}' "
+                    f"role='{role}' autocomplete='{autocomplete}' class='{class_name}'"
+                )
+            except Exception as exc:
+                log.debug(f"Could not describe control #{idx}: {exc}")
