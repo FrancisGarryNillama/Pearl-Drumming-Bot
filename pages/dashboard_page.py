@@ -3,9 +3,12 @@ pages/dashboard_page.py
 =======================
 Page Object for the Pearl27 dashboard / task listing view.
 Handles post discovery, assignment, and prioritization.
+
+Selectors updated to match the actual Pearl27 social-listening DOM.
 """
 
 import time
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -42,19 +45,15 @@ class DashboardPage(BasePage):
     """
     Dashboard page — lists all available drumming posts / tasks.
 
-    NOTE: Selector strings below are best-guess based on common
-    patterns. Inspect the live Pearl27 DOM and update accordingly.
+    Selectors based on the actual Pearl27 social-listening DOM:
+    - Each post card is a div containing a .assignment-dropdown-container
+    - Title is in an <h4> with a title attribute (full text) 
+    - Score is a yellow button inside .assignment-dropdown-container
+    - Status is a button showing e.g. "Not Ready"
+    - External link is in a button's title attribute or an <a> href
     """
 
-    # ── Locators ────────────────────────────────────────────
-    # Posts / task table or card list
-    _POST_ROWS        = (By.CSS_SELECTOR, "tr.post-row, .task-card, .drum-post, [data-testid='post-row']")
-    _POST_TITLE       = (By.CSS_SELECTOR, ".post-title, .task-title, td.title, h3")
-    _POST_LINK        = (By.CSS_SELECTOR, "a.post-link, a.external-link, td.link a, .drum-link")
-    _POST_SCORE       = (By.CSS_SELECTOR, ".score, .points, td.score, [data-score]")
-    _POST_STATUS      = (By.CSS_SELECTOR, ".status, td.status, .task-status")
-    _ASSIGN_BUTTON    = (By.CSS_SELECTOR, "button.assign, .assign-btn, [data-action='assign']")
-    _PLATFORM_CELL    = (By.CSS_SELECTOR, ".platform, td.platform, [data-platform]")
+    _POST_CARDS = (By.CSS_SELECTOR, "div.assignment-dropdown-container")
 
     # ─────────────────────────────────────────────────────────
     # Public API
@@ -62,8 +61,7 @@ class DashboardPage(BasePage):
 
     def get_unassigned_posts(self, account_number: str) -> list[DrummingPost]:
         """
-        Scan the dashboard and return posts that are unassigned
-        (or assigned to this account and not yet completed).
+        Scan the dashboard and return posts eligible for processing.
 
         Args:
             account_number: e.g. 'PH1037'
@@ -73,55 +71,76 @@ class DashboardPage(BasePage):
         """
         log.info("Scanning dashboard for unassigned posts …")
         self._wait_for_page_load()
-        time.sleep(1)
+        time.sleep(2)
 
-        row_elements = self.find_all(*self._POST_ROWS, timeout=15)
-        if not row_elements:
-            log.warning("No post rows found on dashboard.")
+        card_containers = self.find_all(*self._POST_CARDS, timeout=15)
+
+        if not card_containers:
+            log.warning("No post cards found on dashboard.")
             return []
 
-        log.info(f"Found {len(row_elements)} post row(s).")
+        # Walk up to the actual card root div for each container
+        card_roots = []
+        seen_ids = set()
+        for container in card_containers:
+            try:
+                root = self.driver.execute_script(
+                    """
+                    var el = arguments[0];
+                    // Walk up until we find a div with border-gray-200 in its class
+                    while (el && el.parentElement) {
+                        el = el.parentElement;
+                        if (el.className && el.className.includes('border-gray-200')) {
+                            return el;
+                        }
+                    }
+                    // Fallback: return grandparent
+                    return arguments[0].parentElement ? arguments[0].parentElement.parentElement : arguments[0];
+                    """,
+                    container
+                )
+                if root:
+                    el_id = id(root)
+                    if el_id not in seen_ids:
+                        seen_ids.add(el_id)
+                        card_roots.append(root)
+            except Exception:
+                card_roots.append(container)
+
+        log.info(f"Found {len(card_roots)} post card(s).")
 
         posts: list[DrummingPost] = []
-        for idx, row in enumerate(row_elements):
+        for idx, card in enumerate(card_roots):
             try:
-                post = self._parse_row(row, idx)
+                post = self._parse_card(card, idx)
+                log.debug(f"Parsed card {idx}: {post}")
                 if self._is_eligible(post, account_number):
                     posts.append(post)
             except Exception as exc:
-                log.warning(f"Error parsing row {idx}: {exc}")
+                log.warning(f"Error parsing card {idx}: {exc}")
 
-        # Sort by score descending (highest priority first)
         posts.sort(key=lambda p: p.score, reverse=True)
         log.info(f"{len(posts)} eligible post(s) found after filtering.")
         return posts
 
     def assign_post(self, post: DrummingPost, account_number: str) -> bool:
-        """
-        Assign a post to the given account number by clicking
-        the Assign button within the post's row element.
-
-        Args:
-            post:           DrummingPost to assign
-            account_number: Target account (e.g. 'PH1037')
-
-        Returns:
-            True if assignment succeeded.
-        """
-        log.info(f"Assigning post '{post.title}' to {account_number} …")
+        """Assign a post to the given account number."""
+        log.info(f"Assigning post '{post.title[:50]}' to {account_number} …")
         try:
-            assign_btn = post.element.find_element(By.CSS_SELECTOR, self._ASSIGN_BUTTON[1])
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", assign_btn)
+            assign_trigger = post.element.find_element(
+                By.CSS_SELECTOR,
+                "button[class*='bg-yellow'], .assignment-dropdown-container button"
+            )
+            self.driver.execute_script("arguments[0].scrollIntoView(true);", assign_trigger)
             time.sleep(0.3)
-            assign_btn.click()
-
-            # Handle any modal / dropdown that appears
+            assign_trigger.click()
+            time.sleep(1)
             self._handle_assign_modal(account_number)
             log.info(f"✅ Post assigned to {account_number}")
             return True
         except NoSuchElementException:
             log.warning("Assign button not found — post may already be assigned.")
-            return True  # Treat as acceptable state
+            return True
         except Exception as exc:
             log.error(f"Failed to assign post: {exc}")
             return False
@@ -131,116 +150,166 @@ class DashboardPage(BasePage):
         if not posts:
             log.warning("No posts to prioritize.")
             return None
-        best = posts[0]  # Already sorted descending
+        best = posts[0]
         log.info(f"Selected highest-priority post: {best}")
         return best
 
     # ─────────────────────────────────────────────────────────
-    # Private helpers
+    # Card Parsing
     # ─────────────────────────────────────────────────────────
 
-    def _parse_row(self, row: WebElement, idx: int) -> DrummingPost:
-        """Extract data from a single post row element."""
+    def _parse_card(self, card: WebElement, idx: int) -> DrummingPost:
+        """Extract all data from a single post card element."""
 
-        def _cell_text(css: str) -> str:
+        def _text(css: str) -> str:
             try:
-                return safe_strip(row.find_element(By.CSS_SELECTOR, css).text)
+                return safe_strip(card.find_element(By.CSS_SELECTOR, css).text)
             except Exception:
                 return ""
 
-        def _cell_attr(css: str, attr: str) -> str:
+        def _attr(css: str, attr: str) -> str:
             try:
-                el = row.find_element(By.CSS_SELECTOR, css)
-                return safe_strip(el.get_attribute(attr) or el.text)
+                el = card.find_element(By.CSS_SELECTOR, css)
+                return safe_strip(el.get_attribute(attr) or "")
             except Exception:
                 return ""
 
-        # Extract title (try multiple selectors)
-        title = (
-            _cell_text(self._POST_TITLE[1])
-            or _cell_text("td:nth-child(2)")
-            or f"Post #{idx + 1}"
-        )
+        # Title — full text is in h4's title attribute, display text is truncated
+        title = _attr("h4[title]", "title") or _text("h4") or f"Post #{idx + 1}"
 
-        # Extract external link
+        # External link — try <a href> first, then button title attributes
         link = (
-            _cell_attr(self._POST_LINK[1], "href")
-            or _cell_attr("a", "href")
-            or ""
+            _attr("a[href*='http']", "href")
+            or self._extract_link_from_buttons(card)
         )
 
-        # Extract score — try data-score attr, then text parse
-        raw_score = _cell_attr(self._POST_SCORE[1], "data-score") or _cell_text(self._POST_SCORE[1])
+        # Score — the yellow number button
+        raw_score = (
+            _text("button[class*='bg-yellow']")
+            or _text(".assignment-dropdown-container button")
+        )
         score = self._parse_score(raw_score)
 
         # Status
-        status = _cell_text(self._POST_STATUS[1]) or _cell_text("td:last-child")
+        status = self._extract_status(card)
 
-        # Platform
-        platform = _cell_text(self._PLATFORM_CELL[1]) or self._infer_platform(link)
+        # Platform — inferred from link
+        platform = self._infer_platform(link)
 
         return DrummingPost(
-            element=row,
+            element=card,
             title=title,
             link=link,
             score=score,
             status=status,
-            post_id=_cell_attr("[data-id]", "data-id") or str(idx),
+            post_id=str(idx),
             platform=platform,
         )
 
+    def _extract_link_from_buttons(self, card: WebElement) -> str:
+        """
+        Pearl27 shows the external URL in a button's title attribute,
+        e.g. title="instagram.com/p/DXZBxG..."
+        Reconstruct the full URL from it.
+        """
+        platform_domains = [
+            "instagram.com", "reddit.com", "facebook.com",
+            "youtube.com", "tiktok.com", "quora.com",
+            "linkedin.com", "pinterest.com", "pinterest.ph",
+        ]
+        try:
+            buttons = card.find_elements(By.CSS_SELECTOR, "button[title]")
+            for btn in buttons:
+                title_val = btn.get_attribute("title") or ""
+                for domain in platform_domains:
+                    if domain in title_val.lower():
+                        if title_val.startswith("http"):
+                            return title_val
+                        return f"https://{title_val}"
+        except Exception:
+            pass
+        return ""
+
+    def _extract_status(self, card: WebElement) -> str:
+        """Extract the post status from status badge buttons."""
+        known_statuses = ["Not Ready", "Draft Ready", "Approved", "Complete"]
+        try:
+            buttons = card.find_elements(By.CSS_SELECTOR, "button")
+            for btn in buttons:
+                text = safe_strip(btn.text)
+                for status in known_statuses:
+                    if status.lower() == text.lower():
+                        return status
+                    if status.lower() in text.lower():
+                        return status
+        except Exception:
+            pass
+        return "Unknown"
+
+    # ─────────────────────────────────────────────────────────
+    # Static helpers
+    # ─────────────────────────────────────────────────────────
+
     @staticmethod
     def _parse_score(raw: str) -> float:
-        """Extract a numeric score from raw text like '85 pts' or '85'."""
-        import re
         match = re.search(r"[\d.]+", raw)
         return float(match.group()) if match else 0.0
 
     @staticmethod
     def _infer_platform(url: str) -> str:
-        """Guess platform name from URL."""
-        import re
         if not url:
             return "Unknown"
-        match = re.search(r"(?:https?://)?(?:www\.)?([^./]+)", url)
-        return match.group(1).capitalize() if match else "Unknown"
+        url_lower = url.lower()
+        platform_map = {
+            "instagram.com": "Instagram",
+            "reddit.com":    "Reddit",
+            "facebook.com":  "Facebook",
+            "youtube.com":   "YouTube",
+            "tiktok.com":    "TikTok",
+            "quora.com":     "Quora",
+            "linkedin.com":  "LinkedIn",
+            "pinterest.com": "Pinterest",
+            "pinterest.ph":  "Pinterest",
+        }
+        for domain, name in platform_map.items():
+            if domain in url_lower:
+                return name
+        return "Blog/Web"
 
     @staticmethod
     def _is_eligible(post: DrummingPost, account_number: str) -> bool:
-        """
-        A post is eligible if it's not yet Complete and
-        not assigned to a different account.
-        """
-        status_lower = post.status.lower()
-        if "complete" in status_lower:
+        """Eligible = not already Complete."""
+        if "complete" in post.status.lower():
             return False
-        # If status shows it's unassigned or belongs to this account
         return True
 
+    # ─────────────────────────────────────────────────────────
+    # Assignment modal
+    # ─────────────────────────────────────────────────────────
+
     def _handle_assign_modal(self, account_number: str) -> None:
-        """
-        If a modal or dropdown appears after clicking Assign,
-        select the correct account and confirm.
-        """
         time.sleep(1)
         try:
-            # Try dropdown / select
             from selenium.webdriver.support.ui import Select
-            select_el = self.find(By.CSS_SELECTOR, "select.account-select, select[name='account']", timeout=3)
+            select_el = self.find(
+                By.CSS_SELECTOR, "select.account-select, select[name='account']", timeout=3
+            )
             Select(select_el).select_by_visible_text(account_number)
         except Exception:
             pass
 
         try:
-            # Try typing account into a text field
-            input_el = self.find(By.CSS_SELECTOR, "input.account-input, input[placeholder*='account']", timeout=3)
+            input_el = self.find(
+                By.CSS_SELECTOR, "input[placeholder*='account']", timeout=3
+            )
             input_el.clear()
             input_el.send_keys(account_number)
         except Exception:
             pass
 
-        # Confirm
         try:
-            self.click(By.CSS_SELECTOR, "button.confirm, button[type='submit'], .modal-confirm", timeout=5)
+            self.click(
+                By.CSS_SELECTOR, "button.confirm, button[type='submit'], .modal-confirm", timeout=5
+            )
         except Exception:
-            pass
+            pass 

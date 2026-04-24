@@ -32,7 +32,7 @@ def _optional(key: str, default: str = "") -> str:
 
 
 # ─────────────────────────────────────────────
-# Platform
+# Platform (Pearl27)
 # ─────────────────────────────────────────────
 @dataclass
 class PlatformConfig:
@@ -50,6 +50,41 @@ class PlatformConfig:
             f"username=***MASKED***, password=***MASKED***, "
             f"account={self.account_number!r})"
         )
+
+
+# ─────────────────────────────────────────────
+# Social Media Credentials
+# ─────────────────────────────────────────────
+@dataclass
+class SocialCredentialsConfig:
+    """Login credentials for each social media platform."""
+
+    reddit_username:   str = field(default_factory=lambda: _optional("REDDIT_USERNAME", ""))
+    reddit_password:   str = field(default_factory=lambda: _optional("REDDIT_PASSWORD", ""))
+
+    quora_email:       str = field(default_factory=lambda: _optional("QUORA_EMAIL", ""))
+    quora_password:    str = field(default_factory=lambda: _optional("QUORA_PASSWORD", ""))
+
+    linkedin_email:    str = field(default_factory=lambda: _optional("LINKEDIN_EMAIL", ""))
+    linkedin_password: str = field(default_factory=lambda: _optional("LINKEDIN_PASSWORD", ""))
+
+    facebook_email:    str = field(default_factory=lambda: _optional("FACEBOOK_EMAIL", ""))
+    facebook_password: str = field(default_factory=lambda: _optional("FACEBOOK_PASSWORD", ""))
+
+    youtube_email:     str = field(default_factory=lambda: _optional("YOUTUBE_EMAIL", ""))
+    youtube_password:  str = field(default_factory=lambda: _optional("YOUTUBE_PASSWORD", ""))
+
+    tiktok_username:   str = field(default_factory=lambda: _optional("TIKTOK_USERNAME", ""))
+    tiktok_password:   str = field(default_factory=lambda: _optional("TIKTOK_PASSWORD", ""))
+
+    instagram_username: str = field(default_factory=lambda: _optional("INSTAGRAM_USERNAME", ""))
+    instagram_password: str = field(default_factory=lambda: _optional("INSTAGRAM_PASSWORD", ""))
+
+    pinterest_email:   str = field(default_factory=lambda: _optional("PINTEREST_EMAIL", ""))
+    pinterest_password: str = field(default_factory=lambda: _optional("PINTEREST_PASSWORD", ""))
+
+    def __repr__(self) -> str:
+        return "SocialCredentialsConfig(all credentials ***MASKED***)"
 
 
 # ─────────────────────────────────────────────
@@ -143,6 +178,7 @@ class AppConfig:
     webdriver: WebDriverConfig = field(default_factory=WebDriverConfig)
     retry: RetryConfig = field(default_factory=RetryConfig)
     logging: LogConfig = field(default_factory=LogConfig)
+    social: SocialCredentialsConfig = field(default_factory=SocialCredentialsConfig)
 
     # Business constants
     SKIP_KEYWORD: str = "lifewood"
