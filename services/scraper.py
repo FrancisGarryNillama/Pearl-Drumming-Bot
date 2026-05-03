@@ -94,6 +94,12 @@ class ExternalScraper:
             log.warning("Empty URL passed to scraper.")
             return ScrapedContent(url=url)
 
+        # Clean and validate the URL
+        url = self._clean_url(url)
+        if not url or not self._is_valid_url(url):
+            log.error(f"Invalid or malformed URL: {url!r}")
+            return ScrapedContent(url=url)
+
         log.info(f"Scraping: {url}")
         platform = self._detect_platform(url)
 
@@ -284,3 +290,40 @@ class ExternalScraper:
             if domain in url_lower:
                 return name
         return "Blog/Web"
+
+    def _clean_url(self, url: str) -> str:
+        """
+        Clean and normalize URL by removing common prefixes/suffixes.
+        E.g., 'Open www.linkedin.com/posts/...' -> 'https://www.linkedin.com/posts/...'
+        """
+        url = url.strip()
+        
+        # Remove common button label prefixes
+        prefixes_to_strip = ["open ", "visit ", "view ", "check ", "read ", "see "]
+        for prefix in prefixes_to_strip:
+            if url.lower().startswith(prefix):
+                url = url[len(prefix):].strip()
+        
+        # Ensure https:// prefix
+        if not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
+        
+        # Remove trailing whitespace
+        url = url.rstrip()
+        
+        return url
+
+    def _is_valid_url(self, url: str) -> bool:
+        """Check if URL is valid and accessible."""
+        # Must start with http/https
+        if not url.startswith(("http://", "https://")):
+            return False
+        
+        # Must have at least a domain
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            # Must have a netloc (domain part)
+            return bool(parsed.netloc)
+        except Exception:
+            return False

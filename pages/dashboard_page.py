@@ -123,6 +123,91 @@ class DashboardPage(BasePage):
         log.info(f"{len(posts)} eligible post(s) found after filtering.")
         return posts
 
+    def find_and_assign_best_post(self, account_number: str, min_score: float = 50.0, max_scan: int = 50) -> DrummingPost | None:
+        """
+        Efficiently find and assign the best eligible post without scanning all posts.
+
+        Args:
+            account_number: e.g. 'PH1037'
+            min_score: Minimum acceptable score (stop scanning if found)
+            max_scan: Maximum posts to scan before giving up
+
+        Returns:
+            The best eligible post found and assigned, or None if none found.
+        """
+        log.info(f"Scanning for best eligible post (min_score={min_score}, max_scan={max_scan}) …")
+        self._wait_for_page_load()
+        time.sleep(2)
+
+        card_containers = self.find_all(*self._POST_CARDS, timeout=15)
+
+        if not card_containers:
+            log.warning("No post cards found on dashboard.")
+            return None
+
+        # Walk up to the actual card root div for each container (limit to max_scan)
+        card_roots = []
+        seen_ids = set()
+        for container in card_containers[:max_scan]:  # Limit scanning
+            try:
+                root = self.driver.execute_script(
+                    """
+                    var el = arguments[0];
+                    // Walk up until we find a div with border-gray-200 in its class
+                    while (el && el.parentElement) {
+                        el = el.parentElement;
+                        if (el.className && el.className.includes('border-gray-200')) {
+                            return el;
+                        }
+                    }
+                    // Fallback: return grandparent
+                    return arguments[0].parentElement ? arguments[0].parentElement.parentElement : arguments[0];
+                    """,
+                    container
+                )
+                if root:
+                    el_id = id(root)
+                    if el_id not in seen_ids:
+                        seen_ids.add(el_id)
+                        card_roots.append(root)
+            except Exception:
+                card_roots.append(container)
+
+        log.info(f"Scanning {len(card_roots)} post card(s) for best eligible post…")
+
+        best_post: DrummingPost | None = None
+
+        for idx, card in enumerate(card_roots):
+            try:
+                post = self._parse_card(card, idx)
+                log.debug(f"Parsed card {idx}: {post}")
+
+                if self._is_eligible(post, account_number):
+                    # Check if this is better than our current best
+                    if best_post is None or post.score > best_post.score:
+                        best_post = post
+                        log.info(f"New best post found: {post.title[:50]} (score: {post.score})")
+
+                        # If we found a post with high enough score, we can stop early
+                        if post.score >= min_score:
+                            log.info(f"Found post with score >= {min_score}, stopping scan early.")
+                            break
+
+            except Exception as exc:
+                log.warning(f"Error parsing card {idx}: {exc}")
+
+        if best_post:
+            log.info(f"Best eligible post: {best_post.title[:50]} (score: {best_post.score})")
+            # Assign the post immediately
+            if self.assign_post(best_post, account_number):
+                return best_post
+            else:
+                log.warning("Failed to assign the best post.")
+                return None
+        else:
+            log.info("No eligible posts found within scan limit.")
+            return None
+
     def assign_post(self, post: DrummingPost, account_number: str) -> bool:
         """Assign a post to the given account number."""
         log.info(f"Assigning post '{post.title[:50]}' to {account_number} …")
@@ -131,9 +216,34 @@ class DashboardPage(BasePage):
                 By.CSS_SELECTOR,
                 "button[class*='bg-yellow'], .assignment-dropdown-container button"
             )
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", assign_trigger)
+            
+            # Scroll to element with offset to avoid header overlay
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'center'});", 
+                assign_trigger
+            )
+            time.sleep(0.5)
+            
+            # Wait for any floating elements to become non-blocking
+            self.driver.execute_script(
+                """
+                var overlay = document.querySelector('[class*="fixed"][style*="top"]');
+                if (overlay) {
+                    overlay.style.pointerEvents = 'none';
+                }
+                """
+            )
             time.sleep(0.3)
-            assign_trigger.click()
+            
+            # Retry click with fallback to ActionChains
+            try:
+                assign_trigger.click()
+            except Exception as click_err:
+                log.warning(f"Direct click failed, retrying with ActionChains: {click_err}")
+                from selenium.webdriver.common.action_chains import ActionChains
+                actions = ActionChains(self.driver)
+                actions.move_to_element(assign_trigger).click().perform()
+            
             time.sleep(1)
             self._handle_assign_modal(account_number)
             log.info(f"✅ Post assigned to {account_number}")
@@ -221,11 +331,16 @@ class DashboardPage(BasePage):
             buttons = card.find_elements(By.CSS_SELECTOR, "button[title]")
             for btn in buttons:
                 title_val = btn.get_attribute("title") or ""
+                # Strip common prefixes from button labels
+                title_val = title_val.strip()
+                if title_val.lower().startswith(("open ", "visit ", "view ")):
+                    title_val = title_val.split(" ", 1)[1]  # Remove first word
+                
                 for domain in platform_domains:
                     if domain in title_val.lower():
                         if title_val.startswith("http"):
-                            return title_val
-                        return f"https://{title_val}"
+                            return title_val.strip()
+                        return f"https://{title_val.strip()}"
         except Exception:
             pass
         return ""

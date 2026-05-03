@@ -5,7 +5,7 @@ Routes comment posting to the correct social media platform page object.
 
 Usage:
     poster = SocialPoster(driver, social_cfg)
-    success = poster.post(url="https://reddit.com/r/drums/...", comment="...")
+    success = poster.post(url="https://reddit.com/r/drums/...", comment_text="...")
 """
 
 from typing import Optional
@@ -27,7 +27,7 @@ from utils.logger import get_logger
 
 log = get_logger(__name__)
 
-# Maps domain keywords → (page class, username_key, password_key)
+# Maps domain keywords -> (platform_key, page class)
 _PLATFORM_REGISTRY = {
     "reddit.com":    ("reddit",    RedditPage),
     "quora.com":     ("quora",     QuoraPage),
@@ -48,7 +48,7 @@ class SocialPoster:
     Detects the platform from a URL, ensures the correct
     social account is logged in, and posts the comment.
 
-    Login state is cached per platform — each platform only
+    Login state is cached per platform - each platform only
     logs in once per run.
     """
 
@@ -104,9 +104,9 @@ class SocialPoster:
         success = page.post_comment(url, comment_text)
 
         if success:
-            log.info(f"[SocialPoster] ✅ Comment posted on {platform_key}.")
+            log.info(f"[SocialPoster] Comment posted on {platform_key}.")
         else:
-            log.error(f"[SocialPoster] ❌ Failed to post comment on {platform_key}.")
+            log.error(f"[SocialPoster] Failed to post comment on {platform_key}.")
 
         return success
 

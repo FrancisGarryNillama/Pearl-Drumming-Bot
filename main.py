@@ -178,18 +178,20 @@ class Pearl27Orchestrator:
 
     def phase_get_posts(self) -> list[DrummingPost]:
         log.info("── Phase 2: Task Discovery & Assignment ──")
-        posts = self.dashboard.get_unassigned_posts(self.cfg.platform.account_number)
 
-        if not posts:
+        # Use efficient method to find and assign the best post immediately
+        best_post = self.dashboard.find_and_assign_best_post(
+            account_number=self.cfg.platform.account_number,
+            min_score=50.0,  # Stop early if we find a post with score >= 50
+            max_scan=50      # Only scan the first 50 posts to avoid inefficiency
+        )
+
+        if best_post:
+            log.info(f"Successfully found and assigned post: {best_post.title[:50]}")
+            return [best_post]
+        else:
             log.warning("No eligible posts found.")
             return []
-
-        log.info(f"Found {len(posts)} eligible post(s). Assigning …")
-        for post in posts[:MAX_POSTS_PER_RUN]:
-            if not self.dry_run:
-                self.dashboard.assign_post(post, self.cfg.platform.account_number)
-
-        return posts[:MAX_POSTS_PER_RUN]
 
     # ─────────────────────────────────────────────────────────
     # Phase 3: Prioritisation
@@ -197,7 +199,12 @@ class Pearl27Orchestrator:
 
     def phase_prioritise(self, posts: list[DrummingPost]) -> DrummingPost | None:
         log.info("── Phase 3: Prioritisation ──")
-        return self.dashboard.select_highest_priority(posts)
+        # Since we now use find_and_assign_best_post(), the post is already the highest priority
+        if posts:
+            best_post = posts[0]
+            log.info(f"Selected highest-priority post: {best_post}")
+            return best_post
+        return None
 
     # ─────────────────────────────────────────────────────────
     # Phase 4 & 5: Scraping + Keyword Filter
