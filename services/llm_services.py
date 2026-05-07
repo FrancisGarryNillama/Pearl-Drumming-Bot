@@ -55,11 +55,26 @@ class LLMService:
         self.config = config
         self.slang = SlangRotator(slang_openers)
         self._session = requests.Session()
-        self._session.headers.update({
-            "Content-Type":      "application/json",
-            "anthropic-version": "2023-06-01",
-            "x-api-key":         config.api_key,
-        })
+        self._session.headers.update(self._build_auth_headers(config))
+
+    @staticmethod
+    def _build_auth_headers(config: LLMConfig) -> dict[str, str]:
+        """
+        Choose the correct auth headers based on the configured base URL.
+
+        - Anthropic Messages API: uses `x-api-key` + `anthropic-version`
+        - OpenAI-compatible Chat Completions APIs (OpenAI, OpenRouter, etc.): uses `Authorization: Bearer ...`
+        """
+        base_url = (config.base_url or "").lower()
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+
+        if "anthropic.com" in base_url:
+            headers["anthropic-version"] = "2023-06-01"
+            headers["x-api-key"] = config.api_key
+            return headers
+
+        headers["Authorization"] = f"Bearer {config.api_key}"
+        return headers
 
     # ─────────────────────────────────────────────────────────
     # Public API
